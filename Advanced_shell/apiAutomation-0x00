@@ -1,1 +1,13 @@
 #!/bin/bash
+
+http_code=$(curl -s -o data.json -w "%{http_code}" https://pokeapi.co/api/v2/pokemon/pikachu)
+
+# Check if request was successful (HTTP 200 = OK)
+if [ "$http_code" -eq 200 ]; then
+    echo "Successfully fetched Pikachu data and saved to data.json"
+else
+    # If failed, log error to errors.txt
+    echo "Error: Failed to fetch data. HTTP status code: $http_code" >> errors.txt
+    echo "Timestamp: $(date)" >> errors.txt
+    echo "Error logged to errors.txt"
+fi
