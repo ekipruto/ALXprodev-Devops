@@ -13,10 +13,10 @@ name=$(jq -r '.name' < data.json | sed 's/^./\u&/')
 type=$(jq -r '.types[0].type.name' < data.json | sed 's/^./\u&/')
 
 # Extract weight in hectograms and convert to kg
-weight=$(jq -r '.weight' < data.json | awk '{print $1/10}')
+formatted_weight=$(jq -r '.weight' < data.json | awk '{print $1/10}')
 
 # Extract height in decimetres and convert to meters with 1 decimal
-height=$(jq -r '.height' < data.json | awk '{printf "%.1f", $1/10}')
+formatted_height=$(jq -r '.height' < data.json | awk '{printf "%.1f", $1/10}')
 
-# Print formatted output - IMPORTANT: use double quotes for variable expansion
-echo "$name is of type $type, weighs ${weight}kg, and is ${height}m tall."
+# Print formatted output
+echo "$name is of type $type, weighs ${formatted_weight}kg, and is ${formatted_height}m tall."
