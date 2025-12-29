@@ -16,9 +16,9 @@ for pokemon in $pokemon_list; do
     
     # Check if request was successful
     if [ "$http_code" -eq 200 ]; then
-        echo "Saved data to $output_file ✅"
+        echo "Saved data to $output_file "
     else
-        echo "Failed to fetch $pokemon. HTTP Status: $http_code ❌"
+        echo "Failed to fetch $pokemon. HTTP Status: $http_code "
         # Remove empty file if request failed
         rm -f "$output_file"
     fi
@@ -28,5 +28,5 @@ for pokemon in $pokemon_list; do
 done
 
 echo ""
-echo "Batch processing complete! 🎉"
+echo "Batch processing complete! "
 echo "Total files created: $(ls -1 pokemon_data/*.json 2>/dev/null | wc -l)"

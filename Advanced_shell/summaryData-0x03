@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# Configuration
+DATA_DIR="pokemon_data"
+OUTPUT_FILE="pokemon_report.csv"
+
+# Check if pokemon_data directory exists
+if [ ! -d "$DATA_DIR" ]; then
+    echo "Error: $DATA_DIR directory not found."
+    echo "Please run batchProcessing-0x02 first to fetch Pokemon data."
+    exit 1
+fi
+
+# Check if there are any JSON files
+if ! ls "$DATA_DIR"/*.json 1> /dev/null 2>&1; then
+    echo "Error: No JSON files found in $DATA_DIR"
+    exit 1
+fi
+
+# Create CSV file with header
+echo "Name,Height (m),Weight (kg)" > "$OUTPUT_FILE"
+
+# Process each JSON file
+for json_file in "$DATA_DIR"/*.json; do
+    # Extract data using jq
+    name=$(jq -r '.name' < "$json_file" | sed 's/^./\u&/')
+    height=$(jq -r '.height' < "$json_file" | awk '{printf "%.1f", $1/10}')
+    weight=$(jq -r '.weight' < "$json_file" | awk '{printf "%.1f", $1/10}')
+    
+    # Append to CSV
+    echo "$name,$height,$weight" >> "$OUTPUT_FILE"
+done
+
+# Display output
+echo "CSV Report generated at: $OUTPUT_FILE"
+echo ""
+cat "$OUTPUT_FILE"
+echo ""
+
+# Calculate averages using awk
+# Skip header line (NR>1), sum heights and weights
+avg_height=$(awk -F',' 'NR>1 {sum+=$2; count++} END {printf "%.2f", sum/count}' "$OUTPUT_FILE")
+avg_weight=$(awk -F',' 'NR>1 {sum+=$3; count++} END {printf "%.2f", sum/count}' "$OUTPUT_FILE")
+
+echo "Average Height: $avg_height m"
+echo "Average Weight: $avg_weight kg"
