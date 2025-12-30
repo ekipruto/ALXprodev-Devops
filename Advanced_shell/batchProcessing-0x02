@@ -1,32 +1,122 @@
 #!/bin/bash
 
+# Configuration
+MAX_RETRIES=3
+RETRY_DELAY=2
+REQUEST_DELAY=1
+DATA_DIR="pokemon_data"
+ERROR_LOG="error_log.txt"
+API_URL="https://pokeapi.co/api/v2/pokemon"
+
+# Create directory and initialize error log
+mkdir -p "$DATA_DIR"
+echo "=== Batch Processing Started at $(date) ===" > "$ERROR_LOG"
+
 # List of Pokemon to fetch
 pokemon_list="bulbasaur ivysaur venusaur charmander charmeleon"
 
-# API base URL
-api_url="https://pokeapi.co/api/v2/pokemon"
+# Counters for statistics
+total_pokemon=0
+successful_fetches=0
+failed_fetches=0
 
-# Loop through each Pokemon
+# Function to fetch Pokemon data with retry logic
+fetch_pokemon() {
+    local pokemon=$1
+    local output_file="${DATA_DIR}/${pokemon}.json"
+    local attempt=1
+    
+    while [ $attempt -le $MAX_RETRIES ]; do
+        echo "Fetching data for $pokemon... (attempt $attempt/$MAX_RETRIES)"
+        
+        # Make API request with timeout
+        http_code=$(curl -s -o "$output_file" -w "%{http_code}" \
+                    --connect-timeout 10 \
+                    --max-time 30 \
+                    "${API_URL}/${pokemon}")
+        
+        # Check if request was successful
+        if [ "$http_code" -eq 200 ]; then
+            # Verify the file is valid JSON
+            if jq empty "$output_file" 2>/dev/null; then
+                echo "Saved data to $output_file "
+                return 0
+            else
+                echo "Warning: Invalid JSON received"
+                rm -f "$output_file"
+            fi
+        elif [ "$http_code" -eq 404 ]; then
+            # Pokemon not found - no point retrying
+            echo "Error: Pokemon '$pokemon' not found (HTTP 404) "
+            {
+                echo "Pokemon: $pokemon"
+                echo "Error: Not found (HTTP 404)"
+                echo "Timestamp: $(date)"
+                echo "---"
+            } >> "$ERROR_LOG"
+            rm -f "$output_file"
+            return 1
+        else
+            echo "Error: Request failed with HTTP status $http_code"
+        fi
+        
+        # If we haven't succeeded and have retries left
+        if [ $attempt -lt $MAX_RETRIES ]; then
+            echo "Retrying in $RETRY_DELAY seconds..."
+            sleep $RETRY_DELAY
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    # All retries failed - log error
+    echo "Failed to fetch $pokemon after $MAX_RETRIES attempts "
+    {
+        echo "Pokemon: $pokemon"
+        echo "Error: Failed after $MAX_RETRIES attempts"
+        echo "Last HTTP Status: $http_code"
+        echo "Timestamp: $(date)"
+        echo "---"
+    } >> "$ERROR_LOG"
+    
+    rm -f "$output_file"
+    return 1
+}
+
+# Main processing loop
+echo "Starting batch processing for $(echo $pokemon_list | wc -w) Pokemon..."
+echo "=========================================="
+echo ""
+
 for pokemon in $pokemon_list; do
-    echo "Fetching data for $pokemon..."
+    total_pokemon=$((total_pokemon + 1))
     
-    # Make API request and save to file
-    output_file="pokemon_data/${pokemon}.json"
-    http_code=$(curl -s -o "$output_file" -w "%{http_code}" "${api_url}/${pokemon}")
-    
-    # Check if request was successful
-    if [ "$http_code" -eq 200 ]; then
-        echo "Saved data to $output_file "
+    if fetch_pokemon "$pokemon"; then
+        successful_fetches=$((successful_fetches + 1))
     else
-        echo "Failed to fetch $pokemon. HTTP Status: $http_code "
-        # Remove empty file if request failed
-        rm -f "$output_file"
+        failed_fetches=$((failed_fetches + 1))
     fi
     
-    # Add delay to avoid rate limiting (1 second between requests)
-    sleep 1
+    echo ""
+    
+    # Add delay between requests to avoid rate limiting
+    sleep $REQUEST_DELAY
 done
 
+# Display summary
+echo "=========================================="
+echo "Batch processing complete!"
+echo "=========================================="
+echo "Total Pokemon processed: $total_pokemon"
+echo "Successful: $successful_fetches "
+echo "Failed: $failed_fetches "
 echo ""
-echo "Batch processing complete! "
-echo "Total files created: $(ls -1 pokemon_data/*.json 2>/dev/null | wc -l)"
+echo "Successfully fetched files:"
+ls -1 "$DATA_DIR"/*.json 2>/dev/null | wc -l | xargs echo "  Count:"
+
+if [ $failed_fetches -gt 0 ]; then
+    echo ""
+    echo " Errors occurred. Check $ERROR_LOG for details."
+fi
+
+echo "=========================================="
