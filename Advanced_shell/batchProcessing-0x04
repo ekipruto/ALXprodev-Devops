@@ -6,6 +6,7 @@ API_URL="https://pokeapi.co/api/v2/pokemon"
 LOG_DIR="logs"
 MAX_RETRIES=3
 RETRY_DELAY=2
+TIMEOUT=60  # Maximum time to wait for all processes
 
 # Create directories
 mkdir -p "$DATA_DIR" "$LOG_DIR"
@@ -15,6 +16,18 @@ pokemon_list="bulbasaur ivysaur venusaur charmander charmeleon"
 
 # Array to store background process IDs
 declare -a pids
+
+# Cleanup function to kill hanging processes
+cleanup() {
+    echo "Cleaning up background processes..."
+    # Kill all background jobs if they exist
+    if jobs -p | grep -q .; then
+        kill $(jobs -p) 2>/dev/null
+    fi
+}
+
+# Set trap to cleanup on script exit
+trap cleanup EXIT INT TERM
 
 # Function to fetch a single Pokemon (runs in background)
 fetch_pokemon() {
@@ -60,7 +73,7 @@ fetch_pokemon() {
     done
     
     # All attempts failed
-    echo "[$(date '+%H:%M:%S')] ❌ Failed for $pokemon after $MAX_RETRIES attempts" >> "$log_file"
+    echo "[$(date '+%H:%M:%S')]  Failed for $pokemon after $MAX_RETRIES attempts" >> "$log_file"
     echo "FAILED" > "${LOG_DIR}/${pokemon}.status"
     rm -f "$output_file"
     return 1
@@ -85,17 +98,53 @@ done
 
 echo ""
 echo "All fetch processes launched!"
+echo "Active background jobs: $(jobs -p | wc -l)"
 echo "Process IDs: ${pids[@]}"
 echo ""
-echo "Waiting for all processes to complete..."
+
+# Display active jobs
+echo "Current background jobs:"
+jobs -l
 echo ""
 
-# Wait for all background processes to finish
+echo "Waiting for all processes to complete..."
+
+# Wait for all background processes with timeout
+elapsed=0
+while [ $elapsed -lt $TIMEOUT ]; do
+    # Check if any jobs are still running
+    if jobs -p | grep -q .; then
+        echo "Still running... (${elapsed}s elapsed, $(jobs -p | wc -l) jobs active)"
+        sleep 2
+        elapsed=$((elapsed + 2))
+    else
+        echo "All jobs completed!"
+        break
+    fi
+done
+
+# If timeout reached, kill remaining processes
+if [ $elapsed -ge $TIMEOUT ]; then
+    echo "Timeout reached! Killing remaining processes..."
+    for pid in "${pids[@]}"; do
+        if kill -0 $pid 2>/dev/null; then
+            echo "Killing process $pid"
+            kill $pid 2>/dev/null
+        fi
+    done
+fi
+
+# Final wait to ensure all processes are done
 wait
+
+echo ""
+echo "All background processes completed"
+echo "Final job count: $(jobs -p | wc -l)"
+echo ""
 
 # Calculate elapsed time
 end_time=$(date +%s)
-elapsed=$((end_time - start_time))
+total_time=$((end_time - start_time))
 
 # Count successes and failures
 successful=0
@@ -107,7 +156,7 @@ for pokemon in $pokemon_list; do
         status=$(cat "$status_file")
         if [ "$status" = "SUCCESS" ]; then
             successful=$((successful + 1))
-            echo " $pokemon - Success"
+            echo "  $pokemon - Success"
         else
             failed=$((failed + 1))
             echo "  $pokemon - Failed"
@@ -126,7 +175,7 @@ echo "=========================================="
 echo "Total Pokemon: $(echo $pokemon_list | wc -w)"
 echo "Successful: $successful "
 echo "Failed: $failed "
-echo "Total time: ${elapsed} seconds"
+echo "Total time: ${total_time} seconds"
 echo "Files created: $(ls -1 "$DATA_DIR"/*.json 2>/dev/null | wc -l)"
 echo "=========================================="
 echo ""
