@@ -1,0 +1,133 @@
+#!/bin/bash
+
+# Configuration
+DATA_DIR="pokemon_data"
+API_URL="https://pokeapi.co/api/v2/pokemon"
+LOG_DIR="logs"
+MAX_RETRIES=3
+RETRY_DELAY=2
+
+# Create directories
+mkdir -p "$DATA_DIR" "$LOG_DIR"
+
+# List of Pokemon to fetch
+pokemon_list="bulbasaur ivysaur venusaur charmander charmeleon"
+
+# Array to store background process IDs
+declare -a pids
+
+# Function to fetch a single Pokemon (runs in background)
+fetch_pokemon() {
+    local pokemon=$1
+    local output_file="${DATA_DIR}/${pokemon}.json"
+    local log_file="${LOG_DIR}/${pokemon}.log"
+    local attempt=1
+    
+    # Log start
+    echo "[$(date '+%H:%M:%S')] Starting fetch for $pokemon" > "$log_file"
+    
+    # Retry loop
+    while [ $attempt -le $MAX_RETRIES ]; do
+        echo "[$(date '+%H:%M:%S')] Attempt $attempt/$MAX_RETRIES for $pokemon" >> "$log_file"
+        
+        # Make API request
+        http_code=$(curl -s -o "$output_file" -w "%{http_code}" \
+                    --connect-timeout 10 \
+                    --max-time 30 \
+                    "${API_URL}/${pokemon}")
+        
+        # Check if successful
+        if [ "$http_code" -eq 200 ]; then
+            # Verify valid JSON
+            if jq empty "$output_file" 2>/dev/null; then
+                echo "[$(date '+%H:%M:%S')]  Success for $pokemon" >> "$log_file"
+                echo "SUCCESS" > "${LOG_DIR}/${pokemon}.status"
+                return 0
+            else
+                echo "[$(date '+%H:%M:%S')] Invalid JSON for $pokemon" >> "$log_file"
+                rm -f "$output_file"
+            fi
+        else
+            echo "[$(date '+%H:%M:%S')] Failed with HTTP $http_code for $pokemon" >> "$log_file"
+        fi
+        
+        # Retry if needed
+        if [ $attempt -lt $MAX_RETRIES ]; then
+            sleep $RETRY_DELAY
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    # All attempts failed
+    echo "[$(date '+%H:%M:%S')] ❌ Failed for $pokemon after $MAX_RETRIES attempts" >> "$log_file"
+    echo "FAILED" > "${LOG_DIR}/${pokemon}.status"
+    rm -f "$output_file"
+    return 1
+}
+
+# Start time
+start_time=$(date +%s)
+
+echo "=========================================="
+echo "  Parallel Pokemon Data Fetching"
+echo "=========================================="
+echo ""
+echo "Starting parallel fetch for $(echo $pokemon_list | wc -w) Pokemon..."
+echo ""
+
+# Launch all fetch operations in parallel
+for pokemon in $pokemon_list; do
+    echo "Launching fetch for $pokemon..."
+    fetch_pokemon "$pokemon" &
+    pids+=($!)  # Store the process ID
+done
+
+echo ""
+echo "All fetch processes launched!"
+echo "Process IDs: ${pids[@]}"
+echo ""
+echo "Waiting for all processes to complete..."
+echo ""
+
+# Wait for all background processes to finish
+wait
+
+# Calculate elapsed time
+end_time=$(date +%s)
+elapsed=$((end_time - start_time))
+
+# Count successes and failures
+successful=0
+failed=0
+
+for pokemon in $pokemon_list; do
+    status_file="${LOG_DIR}/${pokemon}.status"
+    if [ -f "$status_file" ]; then
+        status=$(cat "$status_file")
+        if [ "$status" = "SUCCESS" ]; then
+            successful=$((successful + 1))
+            echo " $pokemon - Success"
+        else
+            failed=$((failed + 1))
+            echo "  $pokemon - Failed"
+        fi
+    else
+        failed=$((failed + 1))
+        echo "  $pokemon - No status"
+    fi
+done
+
+# Display summary
+echo ""
+echo "=========================================="
+echo "  Processing Complete"
+echo "=========================================="
+echo "Total Pokemon: $(echo $pokemon_list | wc -w)"
+echo "Successful: $successful "
+echo "Failed: $failed "
+echo "Total time: ${elapsed} seconds"
+echo "Files created: $(ls -1 "$DATA_DIR"/*.json 2>/dev/null | wc -l)"
+echo "=========================================="
+echo ""
+echo "Check individual logs in $LOG_DIR/ directory"
